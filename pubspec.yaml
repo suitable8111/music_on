@@ -1,0 +1,58 @@
+name: music_on
+description: "YouTube 음악을 백그라운드에서 재생하는 앱"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # YouTube
+  youtube_explode_dart: ^2.5.0
+
+  # 오디오 재생
+  just_audio: ^0.9.40
+  audio_service: ^0.18.15
+
+  # 로컬 저장
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # 상태 관리
+  flutter_riverpod: ^2.5.1
+
+  # 로컬 파일 경로
+  path_provider: ^2.1.4
+
+  # HTTP 클라이언트
+  http: ^1.2.1
+
+  # UI
+  cached_network_image: ^3.4.1
+  flutter_slidable: ^3.1.1
+  uuid: ^4.4.2
+  palette_generator: ^0.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.13
+  flutter_launcher_icons: ^0.14.3
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 21
