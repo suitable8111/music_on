@@ -14,6 +14,7 @@ import http.server
 import subprocess
 import shutil
 import os
+import sys
 import json
 import time
 import urllib.parse
@@ -425,7 +426,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 add_log(video_id, '다운로드 중')
                 print(f'[↓] 다운로드 중: {video_id}')
                 result = subprocess.run([
-                    'yt-dlp', '-x',
+                    sys.executable, '-m', 'yt_dlp',
+                    '-x',
                     '--audio-format', 'mp3',
                     '--audio-quality', '0',
                     '--no-playlist',
