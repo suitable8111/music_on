@@ -77,12 +77,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<void> _ping() async {
     setState(() { _pinging = true; _pingResult = null; });
-    final input = _controller.text.trim();
-    if (input.isEmpty) {
-      setState(() { _pingResult = '주소를 입력하세요'; _pinging = false; });
-      return;
-    }
-    final url = normalizeServerUrl(input);
+    final url = normalizeServerUrl(_controller.text.trim());
     try {
       final base = url.endsWith('/') ? url : '$url/';
       final token = YoutubeService.authToken;
@@ -93,7 +88,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         if (res.statusCode == 200) {
           _pingResult = '✓ 서버 연결 성공!';
         } else if (res.statusCode == 401) {
-          _pingResult = '✗ 인증 실패: 로그인 후 다시 시도하세요';
+          _pingResult = '✗ 인증 실패';
         } else {
           _pingResult = '✗ 서버 오류: ${res.statusCode}';
         }
@@ -101,6 +96,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       });
     } catch (e) {
       setState(() { _pingResult = '✗ 연결 실패: 서버가 실행 중인지 확인하세요'; _pinging = false; });
+    }
+  }
+
+  Future<void> _loginAndTest() async {
+    final serverUrl = normalizeServerUrl(_controller.text.trim());
+    if (serverUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('서버 주소를 먼저 입력하세요'), backgroundColor: AppColors.primary),
+      );
+      return;
+    }
+    // 1. 서버 주소 자동 저장
+    ref.read(serverUrlProvider.notifier).set(_controller.text);
+    // 2. 로그인
+    await ref.read(authProvider.notifier).login(
+      serverUrl,
+      _loginUsernameCtrl.text.trim(),
+      _loginPasswordCtrl.text,
+    );
+    // 3. 로그인 성공 시 자동 연결 테스트
+    if (ref.read(authProvider).isLoggedIn) {
+      await _ping();
     }
   }
 
@@ -253,110 +270,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         padding: const EdgeInsets.all(24),
         children: [
 
-          // ── 계정 로그인 ──────────────────────────────────
-          const Text(
-            '계정 로그인',
-            style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 12),
-
-          if (auth.isLoggedIn) ...[
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.withValues(alpha: 0.4), width: 1),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.check_circle, color: Colors.green, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '로그인됨: ${auth.username} (${auth.role ?? 'user'})',
-                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      ref.read(authProvider.notifier).logout(serverUrl);
-                      YoutubeService.authToken = null;
-                    },
-                    child: const Text('로그아웃', style: TextStyle(color: Colors.redAccent, fontSize: 13)),
-                  ),
-                ],
-              ),
-            ),
-          ] else ...[
-            TextField(
-              controller: _loginUsernameCtrl,
-              style: const TextStyle(color: AppColors.textPrimary),
-              decoration: InputDecoration(
-                hintText: '사용자 이름',
-                hintStyle: const TextStyle(color: AppColors.textSecondary),
-                filled: true,
-                fillColor: AppColors.surface,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _loginPasswordCtrl,
-              obscureText: true,
-              style: const TextStyle(color: AppColors.textPrimary),
-              decoration: InputDecoration(
-                hintText: '비밀번호',
-                hintStyle: const TextStyle(color: AppColors.textSecondary),
-                filled: true,
-                fillColor: AppColors.surface,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-            if (auth.error != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                auth.error!,
-                style: const TextStyle(color: Colors.redAccent, fontSize: 13),
-              ),
-            ],
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: auth.isLoading
-                    ? null
-                    : () {
-                        ref.read(authProvider.notifier).login(
-                          serverUrl,
-                          _loginUsernameCtrl.text.trim(),
-                          _loginPasswordCtrl.text,
-                        );
-                      },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                child: auth.isLoading
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('로그인', style: TextStyle(color: Colors.white, fontSize: 16)),
-              ),
-            ),
-          ],
-
-          // ── 서버 주소 설정 ──────────────────────────────
-          const SizedBox(height: 32),
+          // ── 서버 주소 ────────────────────────────────────
           Row(
             children: [
               const Text(
-                '서버 주소 확인',
+                '서버 주소',
                 style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
@@ -422,44 +340,122 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _save,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: const Text('저장', style: TextStyle(color: Colors.white, fontSize: 16)),
-                ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _save,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.surface,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
               ),
-              const SizedBox(width: 12),
-              Tooltip(
-                message: auth.isLoggedIn ? '' : '로그인 후 연결 테스트 가능',
-                child: ElevatedButton(
-                  onPressed: (_pinging || !auth.isLoggedIn) ? null : _ping,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.surface,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+              child: const Text('저장', style: TextStyle(color: AppColors.textPrimary, fontSize: 15)),
+            ),
+          ),
+
+          // ── 계정 로그인 ──────────────────────────────────
+          const SizedBox(height: 32),
+          const Text(
+            '계정 로그인',
+            style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+
+          if (auth.isLoggedIn) ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green.withValues(alpha: 0.4), width: 1),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '${auth.username} (${auth.role ?? 'user'})',
+                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+                    ),
                   ),
-                  child: _pinging
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('연결 테스트', style: TextStyle(color: AppColors.textPrimary)),
+                  if (_pinging)
+                    const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary))
+                  else
+                    TextButton(
+                      onPressed: _ping,
+                      child: const Text('연결 테스트', style: TextStyle(color: AppColors.primary, fontSize: 13)),
+                    ),
+                  TextButton(
+                    onPressed: () {
+                      setState(() => _pingResult = null);
+                      ref.read(authProvider.notifier).logout(serverUrl);
+                      YoutubeService.authToken = null;
+                    },
+                    child: const Text('로그아웃', style: TextStyle(color: Colors.redAccent, fontSize: 13)),
+                  ),
+                ],
+              ),
+            ),
+            if (_pingResult != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _pingResult!,
+                style: TextStyle(
+                  color: _pingResult!.startsWith('✓') ? Colors.green : Colors.redAccent,
+                  fontSize: 13,
                 ),
               ),
             ],
-          ),
-          if (_pingResult != null) ...[
+          ] else ...[
+            TextField(
+              controller: _loginUsernameCtrl,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: '사용자 이름',
+                hintStyle: const TextStyle(color: AppColors.textSecondary),
+                filled: true,
+                fillColor: AppColors.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _loginPasswordCtrl,
+              obscureText: true,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: '비밀번호',
+                hintStyle: const TextStyle(color: AppColors.textSecondary),
+                filled: true,
+                fillColor: AppColors.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            if (auth.error != null) ...[
+              const SizedBox(height: 8),
+              Text(auth.error!, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
+            ],
             const SizedBox(height: 12),
-            Text(
-              _pingResult!,
-              style: TextStyle(
-                color: _pingResult!.startsWith('✓') ? Colors.green : AppColors.primary,
-                fontSize: 14,
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: (auth.isLoading || _pinging) ? null : _loginAndTest,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: (auth.isLoading || _pinging)
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('로그인 & 연결 테스트', style: TextStyle(color: Colors.white, fontSize: 16)),
               ),
             ),
           ],
