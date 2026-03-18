@@ -12,6 +12,7 @@ import 'downloaded_songs_screen.dart';
 import 'favorites_screen.dart';
 import 'player_screen.dart';
 import 'playlist_screen.dart';
+import 'search_screen.dart';
 import 'settings_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -140,6 +141,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> with SingleTickerProvid
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.search, color: AppColors.primary),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen())),
+            tooltip: 'YouTube 검색',
+          ),
           if (_tabController.index == 0)
             IconButton(
               icon: const Icon(Icons.add, color: AppColors.primary),

@@ -221,16 +221,58 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         padding: const EdgeInsets.all(24),
         children: [
           // ── 서버 주소 설정 ──────────────────────────────
-          const Text(
-            'Mac 서버 주소',
-            style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+          Row(
+            children: [
+              const Text(
+                '서버 주소 확인',
+                style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.info_outline, color: AppColors.textSecondary, size: 20),
+                tooltip: '서버 설정 안내',
+                onPressed: () => showDialog(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    backgroundColor: AppColors.card,
+                    title: const Text('서버 설정 안내', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold)),
+                    content: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Mac에서 server.py를 실행한 후\n표시된 IP 주소를 입력하세요.\n포트 미입력 시 기본값 8888이 사용됩니다.',
+                          style: TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.6),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text('서버 실행 방법', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            '# 1. 의존성 설치 (최초 1회)\nbrew install yt-dlp ffmpeg\n\n# 2. 서버 실행\npython3 tools/server.py',
+                            style: TextStyle(color: AppColors.textSecondary, fontSize: 12, fontFamily: 'monospace', height: 1.6),
+                          ),
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('확인', style: TextStyle(color: AppColors.primary)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'Mac에서 tools/server.py를 실행한 후\n표시된 IP 주소를 입력하세요.\n포트 미입력 시 기본값 8888이 사용됩니다.',
-            style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           TextField(
             controller: _controller,
             style: const TextStyle(color: AppColors.textPrimary),
@@ -460,31 +502,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ],
           ],
 
-          // ── 서버 실행 방법 ───────────────────────────────
-          const SizedBox(height: 32),
-          const Text(
-            '서버 실행 방법',
-            style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Text(
-              '# 1. 의존성 설치 (최초 1회)\n'
-              'brew install yt-dlp ffmpeg\n\n'
-              '# 2. 서버 실행\n'
-              'python3 tools/server.py',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 13,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
           const SizedBox(height: 24),
         ],
       ),

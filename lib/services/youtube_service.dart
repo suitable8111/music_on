@@ -144,6 +144,12 @@ class YoutubeService {
     return List<String>.from(jsonDecode(res.body) as List);
   }
 
+  /// YouTube 검색 — 최대 [maxResults]개 Video 반환
+  Future<List<Video>> searchVideos(String query, {int maxResults = 20}) async {
+    final results = await _yt.search.search(query);
+    return results.whereType<Video>().take(maxResults).toList();
+  }
+
   /// 특정 곡 캐시 삭제
   Future<void> clearCache(String videoId) async {
     final file = await _cacheFile(videoId);
