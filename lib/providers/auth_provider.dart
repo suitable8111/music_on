@@ -77,10 +77,35 @@ class AuthNotifier extends StateNotifier<AuthState> {
             .timeout(const Duration(seconds: 5));
       } catch (_) {}
     }
+    await _clearLocal();
+  }
+
+  /// 토큰 만료 등 401 수신 시 로컬 세션 제거 (서버 로그아웃 생략)
+  Future<void> forceLogout() async {
+    await _clearLocal();
+  }
+
+  Future<void> _clearLocal() async {
     await _box.delete(_tokenKey);
     await _box.delete(_usernameKey);
     await _box.delete(_roleKey);
     state = const AuthState();
+  }
+
+  /// 앱 시작 시 저장된 토큰이 서버에서 아직 유효한지 확인
+  Future<void> verifyToken(String serverUrl) async {
+    if (!state.isLoggedIn || serverUrl.isEmpty) return;
+    try {
+      final res = await http.get(
+        Uri.parse('${serverUrl.replaceAll(RegExp(r'/$'), '')}/ping'),
+        headers: {'Authorization': 'Bearer ${state.token}'},
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 401) {
+        await _clearLocal();
+      }
+    } catch (_) {
+      // 서버 미응답이면 로컬 상태 유지
+    }
   }
 }
 

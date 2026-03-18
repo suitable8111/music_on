@@ -60,6 +60,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void initState() {
     super.initState();
     _controller = TextEditingController(text: displayServerUrl(ref.read(serverUrlProvider)));
+    // 저장된 토큰이 서버에서 아직 유효한지 백그라운드로 확인
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final serverUrl = ref.read(serverUrlProvider);
+      ref.read(authProvider.notifier).verifyToken(serverUrl);
+    });
   }
 
   @override
@@ -80,10 +85,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final url = normalizeServerUrl(input);
     try {
       final base = url.endsWith('/') ? url : '$url/';
-      final res = await http.get(Uri.parse('${base}ping'))
+      final token = YoutubeService.authToken;
+      final headers = token != null ? {'Authorization': 'Bearer $token'} : <String, String>{};
+      final res = await http.get(Uri.parse('${base}ping'), headers: headers)
           .timeout(const Duration(seconds: 5));
       setState(() {
-        _pingResult = res.statusCode == 200 ? '✓ 서버 연결 성공!' : '✗ 서버 오류: ${res.statusCode}';
+        if (res.statusCode == 200) {
+          _pingResult = '✓ 서버 연결 성공!';
+        } else if (res.statusCode == 401) {
+          _pingResult = '✗ 인증 실패: 로그인 후 다시 시도하세요';
+        } else {
+          _pingResult = '✗ 서버 오류: ${res.statusCode}';
+        }
         _pinging = false;
       });
     } catch (e) {
@@ -424,16 +437,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: _pinging ? null : _ping,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.surface,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+              Tooltip(
+                message: auth.isLoggedIn ? '' : '로그인 후 연결 테스트 가능',
+                child: ElevatedButton(
+                  onPressed: (_pinging || !auth.isLoggedIn) ? null : _ping,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.surface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+                  ),
+                  child: _pinging
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('연결 테스트', style: TextStyle(color: AppColors.textPrimary)),
                 ),
-                child: _pinging
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('연결 테스트', style: TextStyle(color: AppColors.textPrimary)),
               ),
             ],
           ),

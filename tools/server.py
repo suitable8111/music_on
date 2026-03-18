@@ -22,7 +22,7 @@ import hashlib
 import urllib.parse
 import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 PORT = 8888
 CACHE_DIR = Path.home() / '.music_on_cache'
@@ -52,7 +52,8 @@ _visitors_lock = threading.Lock()
 
 # 인증 관련
 _users: dict = {}    # {username: {hash, salt, role, created_at}}
-_sessions: dict = {}  # {token: {username, created_at, ip}}
+_sessions: dict = {}  # {token: {username, created_at, expires_at, ip}}
+TOKEN_EXPIRY_DAYS = 30
 _auth_attempts: dict = {}  # {ip: [timestamps]}
 _auth_lock = threading.Lock()
 
@@ -109,8 +110,23 @@ def _check_rate(ip: str) -> bool:
         return len(attempts) < 5
 
 
+def _cleanup_expired_sessions():
+    """만료된 세션 제거 후 제거된 수 반환"""
+    now = datetime.now()
+    with _auth_lock:
+        expired = [
+            t for t, s in _sessions.items()
+            if s.get('expires_at') and datetime.fromisoformat(s['expires_at']) < now
+        ]
+        for t in expired:
+            del _sessions[t]
+        if expired:
+            _save_sessions()
+    return len(expired)
+
+
 def _get_token(handler) -> tuple:
-    """(token, username) from Authorization: Bearer header"""
+    """(token, username) from Authorization: Bearer header. 만료 토큰은 자동 삭제."""
     auth_header = handler.headers.get('Authorization', '')
     if not auth_header.startswith('Bearer '):
         return None, None
@@ -119,6 +135,17 @@ def _get_token(handler) -> tuple:
         session = _sessions.get(token)
     if session is None:
         return None, None
+    # 만료 체크
+    expires_at = session.get('expires_at')
+    if expires_at:
+        try:
+            if datetime.fromisoformat(expires_at) < datetime.now():
+                with _auth_lock:
+                    _sessions.pop(token, None)
+                    _save_sessions()
+                return None, None
+        except ValueError:
+            pass
     return token, session['username']
 
 
@@ -695,7 +722,7 @@ async function restartServer() {
   const poll = setInterval(async () => {
     attempts++;
     try {
-      const r = await fetch('/ping');
+      const r = await fetch('/health');
       if (r.ok) {
         clearInterval(poll);
         btn.disabled = false;
@@ -837,13 +864,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         record_visitor(client_ip, parsed.path)
 
         # 인증 불필요 엔드포인트
-        if parsed.path == '/ping':
-            self._respond(200, b'pong', 'text/plain')
+        if parsed.path == '/health':
+            # 서버 재시작 감지 등 내부 폴링용 공개 엔드포인트
+            self._respond(200, b'ok', 'text/plain')
         elif parsed.path in ('/', '/dashboard'):
             self._serve_dashboard()
         elif parsed.path == '/setup/status':
             self._serve_setup_status()
         # 인증 필요 엔드포인트
+        elif parsed.path == '/ping':
+            username = _require_auth(self)
+            if username is None:
+                return
+            # 만료 세션 정리 (요청마다 경량 수행)
+            _cleanup_expired_sessions()
+            self._respond(200, b'pong', 'text/plain')
         elif parsed.path == '/audio' and 'id' in params:
             username = _require_auth(self)
             if username is None:
@@ -975,9 +1010,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(401, {'error': '사용자 이름 또는 비밀번호가 틀렸습니다'})
             return
         token = secrets.token_urlsafe(32)
+        now = datetime.now()
         session = {
             'username': username,
-            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'created_at': now.strftime('%Y-%m-%d %H:%M'),
+            'expires_at': (now + timedelta(days=TOKEN_EXPIRY_DAYS)).isoformat(),
             'ip': client_ip,
         }
         with _auth_lock:
