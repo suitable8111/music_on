@@ -377,7 +377,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      '${auth.username} (${auth.role ?? 'user'})',
+                      auth.username ?? '',
                       style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
                     ),
                   ),
