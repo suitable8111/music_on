@@ -46,6 +46,33 @@ _visitors: dict = {}  # {ip: {count, first_seen, last_seen, last_path}}
 _visitors_lock = threading.Lock()
 
 
+def find_ffmpeg() -> str | None:
+    """ffmpeg 실행 파일 디렉터리 탐색. yt-dlp --ffmpeg-location 인자로 사용."""
+    ff = shutil.which('ffmpeg')
+    if ff:
+        return str(Path(ff).parent)
+    if sys.platform == 'win32':
+        candidates = [
+            # winget (Gyan.FFmpeg) 기본 설치 경로
+            Path(os.environ.get('PROGRAMFILES', 'C:/Program Files')) / 'ffmpeg' / 'bin',
+            Path(os.environ.get('PROGRAMFILES', 'C:/Program Files')) / 'ffmpeg-full_build' / 'bin',
+            # 사용자 홈 하위 (수동 설치)
+            Path.home() / 'ffmpeg' / 'bin',
+            Path.home() / 'Downloads' / 'ffmpeg' / 'bin',
+        ]
+        # WinGet 패키지 캐시 경로 (버전 폴더 포함)
+        winget_pkgs = Path(os.environ.get('LOCALAPPDATA', '')) / 'Microsoft' / 'WinGet' / 'Packages'
+        if winget_pkgs.exists():
+            for pkg in winget_pkgs.glob('Gyan.FFmpeg*'):
+                for bin_dir in pkg.rglob('bin'):
+                    if (bin_dir / 'ffmpeg.exe').exists():
+                        candidates.insert(0, bin_dir)
+        for c in candidates:
+            if c.exists() and (c / ('ffmpeg.exe' if sys.platform == 'win32' else 'ffmpeg')).exists():
+                return str(c)
+    return None
+
+
 def get_lock(video_id: str) -> threading.Lock:
     with _locks_mutex:
         if video_id not in _locks:
@@ -425,15 +452,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     _active_downloads.add(video_id)
                 add_log(video_id, '다운로드 중')
                 print(f'[↓] 다운로드 중: {video_id}')
-                result = subprocess.run([
+                cmd = [
                     sys.executable, '-m', 'yt_dlp',
                     '-x',
                     '--audio-format', 'mp3',
                     '--audio-quality', '0',
                     '--no-playlist',
                     '-o', str(CACHE_DIR / '%(id)s.%(ext)s'),
-                    f'https://www.youtube.com/watch?v={video_id}'
-                ], capture_output=True, text=True)
+                ]
+                ffmpeg_dir = find_ffmpeg()
+                if ffmpeg_dir:
+                    cmd.extend(['--ffmpeg-location', ffmpeg_dir])
+                else:
+                    print('[!] ffmpeg를 찾을 수 없습니다. start.bat을 실행하거나 ffmpeg를 설치하세요.')
+                cmd.append(f'https://www.youtube.com/watch?v={video_id}')
+                result = subprocess.run(cmd, capture_output=True, text=True)
                 with _active_lock:
                     _active_downloads.discard(video_id)
 

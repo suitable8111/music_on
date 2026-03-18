@@ -33,25 +33,53 @@ if errorlevel 1 (
 )
 echo [OK] yt-dlp 준비 완료
 
-:: ── 3. ffmpeg 확인 ─────────────────────────────────────
+:: ── 3. ffmpeg 확인 및 자동 설치 ────────────────────────
 ffmpeg -version >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo [!] ffmpeg가 설치되지 않았습니다.
+    echo [!] ffmpeg가 없습니다. 자동 설치를 시도합니다...
+
+    :: 방법 1: winget 시도
+    winget install --id Gyan.FFmpeg -e --silent >nul 2>&1
+    if not errorlevel 1 (
+        echo [OK] winget으로 ffmpeg 설치 완료
+        :: winget 설치 후 PATH 갱신 (PowerShell로 시스템 PATH 읽기)
+        for /f "usebackq tokens=*" %%p in (`powershell -noprofile -command "[Environment]::GetEnvironmentVariable('PATH','Machine')"`) do set PATH=%%p;%PATH%
+        goto :ffmpeg_done
+    )
+
+    :: 방법 2: PowerShell로 직접 다운로드
+    echo [->] winget 실패, ffmpeg를 직접 다운로드합니다...
+    set FFMPEG_DIR=%LOCALAPPDATA%\music_on\ffmpeg
+    powershell -noprofile -command ^
+        "$url='https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip';" ^
+        "$zip='%TEMP%\ffmpeg.zip';" ^
+        "Write-Host '[->] 다운로드 중 (약 80MB)...';" ^
+        "Invoke-WebRequest $url -OutFile $zip -UseBasicParsing;" ^
+        "Expand-Archive $zip -DestinationPath '%LOCALAPPDATA%\music_on' -Force;" ^
+        "Rename-Item '%LOCALAPPDATA%\music_on\ffmpeg-7.1-essentials_build' '%LOCALAPPDATA%\music_on\ffmpeg' -ErrorAction SilentlyContinue;" ^
+        "Write-Host '[OK] 다운로드 완료'"
+    if exist "%FFMPEG_DIR%\bin\ffmpeg.exe" (
+        set PATH=%FFMPEG_DIR%\bin;%PATH%
+        echo [OK] ffmpeg 설치 완료: %FFMPEG_DIR%\bin
+        goto :ffmpeg_done
+    )
+
+    :: 두 방법 모두 실패
     echo.
-    echo   방법 1 - winget (Windows 11 권장):
-    echo     winget install ffmpeg
+    echo [!] ffmpeg 자동 설치에 실패했습니다.
+    echo     수동 설치: https://www.gyan.dev/ffmpeg/builds/
+    echo     설치 후 bin 폴더를 PATH에 추가하고 다시 실행하세요.
     echo.
-    echo   방법 2 - 수동 설치:
-    echo     https://www.gyan.dev/ffmpeg/builds/ 에서 다운로드
-    echo     압축 해제 후 bin 폴더를 시스템 PATH에 추가
-    echo.
-    echo   ffmpeg 설치 후 이 스크립트를 다시 실행하세요.
+    echo     서버는 실행되지만 음악 다운로드가 동작하지 않을 수 있습니다.
     echo.
     pause
-    exit /b 1
 )
-echo [OK] ffmpeg 준비 완료
+:ffmpeg_done
+ffmpeg -version >nul 2>&1
+if not errorlevel 1 (
+    echo [OK] ffmpeg 준비 완료
+)
 
 :: ── 4. 서버 시작 ───────────────────────────────────────
 echo.
