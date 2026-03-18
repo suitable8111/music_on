@@ -9,6 +9,12 @@ import '../core/utils/youtube_utils.dart';
 class YoutubeService {
   final _yt = YoutubeExplode();
 
+  /// 서버 API 호출 시 사용할 인증 토큰 (앱 로그인 후 설정됨)
+  static String? authToken;
+
+  static Map<String, String> get _authHeaders =>
+      authToken != null ? {'Authorization': 'Bearer $authToken'} : {};
+
   Future<Song> fetchSongInfo(String url) async {
     final videoId = YoutubeUtils.extractVideoId(url);
     if (videoId == null) throw Exception('유효하지 않은 YouTube URL입니다.');
@@ -90,18 +96,19 @@ class YoutubeService {
 
     final client = http.Client();
     try {
-      final request = await client.send(http.Request('GET', uri));
-      if (request.statusCode != 200) {
-        throw Exception('서버 오류 ${request.statusCode}');
+      final request = http.Request('GET', uri)..headers.addAll(_authHeaders);
+      final response = await client.send(request);
+      if (response.statusCode != 200) {
+        throw Exception('서버 오류 ${response.statusCode}');
       }
 
-      final total = request.contentLength ?? 0;
+      final total = response.contentLength ?? 0;
       int received = 0;
       final tmpFile = File('${file.path}.tmp');
       final sink = tmpFile.openWrite();
 
       try {
-        await for (final chunk in request.stream) {
+        await for (final chunk in response.stream) {
           sink.add(chunk);
           received += chunk.length;
           onProgress?.call(received, total);
@@ -138,7 +145,7 @@ class YoutubeService {
   Future<List<String>> fetchServerIds(String serverUrl) async {
     final base = serverUrl.endsWith('/') ? serverUrl : '$serverUrl/';
     final res = await http
-        .get(Uri.parse('${base}list'))
+        .get(Uri.parse('${base}list'), headers: _authHeaders)
         .timeout(const Duration(seconds: 10));
     if (res.statusCode != 200) throw Exception('서버 오류: ${res.statusCode}');
     return List<String>.from(jsonDecode(res.body) as List);

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import '../../core/constants/app_colors.dart';
 import '../../data/models/song.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/downloaded_songs_provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/playlist_provider.dart';
@@ -49,6 +50,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   List<_SyncItem>? _syncItems;
   bool _downloading = false;
 
+  // 로그인 폼 상태
+  final _loginUsernameCtrl = TextEditingController();
+  final _loginPasswordCtrl = TextEditingController();
+
   final _youtubeService = YoutubeService();
 
   @override
@@ -60,6 +65,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _controller.dispose();
+    _loginUsernameCtrl.dispose();
+    _loginPasswordCtrl.dispose();
     super.dispose();
   }
 
@@ -178,10 +185,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           song = item.song!;
         } else {
           song = await _youtubeService.fetchSongInfoById(item.videoId);
-          if (mounted) setState(() {
-            item.song = song;
-            item.title = song.title;
-          });
+          if (mounted) {
+            setState(() {
+              item.song = song;
+              item.title = song.title;
+            });
+          }
         }
 
         // 2. 서버에서 오디오 다운로드
@@ -202,6 +211,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = ref.watch(authProvider);
+    final serverUrl = ref.watch(serverUrlProvider);
+
+    // 토큰이 바뀔 때마다 YoutubeService에 반영
+    ref.listen<AuthState>(authProvider, (prev, next) {
+      YoutubeService.authToken = next.token;
+    });
+    // 초기에도 설정
+    YoutubeService.authToken = auth.token;
+
     final syncItems = _syncItems;
     final selectedCount = syncItems?.where((i) => i.selected).length ?? 0;
     final allSelected = syncItems != null && syncItems.isNotEmpty && selectedCount == syncItems.length;
@@ -220,7 +239,107 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
+
+          // ── 계정 로그인 ──────────────────────────────────
+          const Text(
+            '계정 로그인',
+            style: TextStyle(color: AppColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+
+          if (auth.isLoggedIn) ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green.withValues(alpha: 0.4), width: 1),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '로그인됨: ${auth.username} (${auth.role ?? 'user'})',
+                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      ref.read(authProvider.notifier).logout(serverUrl);
+                      YoutubeService.authToken = null;
+                    },
+                    child: const Text('로그아웃', style: TextStyle(color: Colors.redAccent, fontSize: 13)),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            TextField(
+              controller: _loginUsernameCtrl,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: '사용자 이름',
+                hintStyle: const TextStyle(color: AppColors.textSecondary),
+                filled: true,
+                fillColor: AppColors.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _loginPasswordCtrl,
+              obscureText: true,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: InputDecoration(
+                hintText: '비밀번호',
+                hintStyle: const TextStyle(color: AppColors.textSecondary),
+                filled: true,
+                fillColor: AppColors.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            if (auth.error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                auth.error!,
+                style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+              ),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: auth.isLoading
+                    ? null
+                    : () {
+                        ref.read(authProvider.notifier).login(
+                          serverUrl,
+                          _loginUsernameCtrl.text.trim(),
+                          _loginPasswordCtrl.text,
+                        );
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: auth.isLoading
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('로그인', style: TextStyle(color: Colors.white, fontSize: 16)),
+              ),
+            ),
+          ],
+
           // ── 서버 주소 설정 ──────────────────────────────
+          const SizedBox(height: 32),
           Row(
             children: [
               const Text(
@@ -276,7 +395,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           TextField(
             controller: _controller,
             style: const TextStyle(color: AppColors.textPrimary),
-            keyboardType: TextInputType.numberWithOptions(decimal: true),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
               hintText: '192.168.0.x',
               prefixText: 'http://',
