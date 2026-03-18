@@ -1341,6 +1341,7 @@ if __name__ == '__main__':
         import webbrowser
         threading.Timer(1.0, lambda: webbrowser.open(dashboard_url)).start()
 
+    http.server.ThreadingHTTPServer.allow_reuse_address = True
     _server = http.server.ThreadingHTTPServer(('0.0.0.0', PORT), Handler)
     try:
         _server.serve_forever()
