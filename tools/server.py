@@ -1071,8 +1071,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     _active_downloads.add(video_id)
                 add_log(video_id, '다운로드 중')
                 print(f'[↓] 다운로드 중: {video_id}')
+                # brew(Mac)는 독립 바이너리, pip(Windows/Linux)는 모듈로 설치됨
+                ytdlp_bin = shutil.which('yt-dlp')
+                if ytdlp_bin:
+                    ytdlp_cmd = [ytdlp_bin]
+                else:
+                    ytdlp_cmd = [sys.executable, '-m', 'yt_dlp']
                 cmd = [
-                    sys.executable, '-m', 'yt_dlp',
+                    *ytdlp_cmd,
                     '-x',
                     '--audio-format', 'mp3',
                     '--audio-quality', '0',
