@@ -9,7 +9,7 @@ import '../../providers/downloaded_songs_provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/playlist_provider.dart';
 import '../../providers/audio_provider.dart' show playerProvider, PlaybackMode;
-import '../../providers/server_provider.dart' show serverUrlProvider, normalizeServerUrl, displayServerUrl, playbackModeProvider;
+import '../../providers/server_provider.dart' show serverUrlProvider, normalizeServerUrl, playbackModeProvider;
 import '../../providers/server_status_provider.dart';
 import '../../services/youtube_service.dart';
 
@@ -42,6 +42,7 @@ class _SyncItem {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late TextEditingController _controller;
+  late TextEditingController _portController;
   String? _pingResult;
   bool _pinging = false;
 
@@ -59,7 +60,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: displayServerUrl(ref.read(serverUrlProvider)));
+    // 저장된 URL에서 IP와 포트 분리
+    var stored = ref.read(serverUrlProvider);
+    if (stored.startsWith('http://')) stored = stored.substring(7);
+    if (stored.startsWith('https://')) stored = stored.substring(8);
+    final colonIdx = stored.indexOf(':');
+    final ip = colonIdx >= 0 ? stored.substring(0, colonIdx) : stored;
+    final port = colonIdx >= 0 ? stored.substring(colonIdx + 1) : '8888';
+    _controller = TextEditingController(text: ip);
+    _portController = TextEditingController(text: port);
     // 저장된 토큰이 서버에서 아직 유효한지 백그라운드로 확인
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final serverUrl = ref.read(serverUrlProvider);
@@ -70,14 +79,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _controller.dispose();
+    _portController.dispose();
     _loginUsernameCtrl.dispose();
     _loginPasswordCtrl.dispose();
     super.dispose();
   }
 
+  /// IP + 포트를 합쳐 normalizeServerUrl 에 넘길 문자열 반환
+  String get _rawInput {
+    final ip = _controller.text.trim();
+    final port = _portController.text.trim();
+    return port.isEmpty || port == '8888' ? ip : '$ip:$port';
+  }
+
   Future<void> _ping() async {
     setState(() { _pinging = true; _pingResult = null; });
-    final url = normalizeServerUrl(_controller.text.trim());
+    final url = normalizeServerUrl(_rawInput);
     try {
       final base = url.endsWith('/') ? url : '$url/';
       final token = YoutubeService.authToken;
@@ -100,7 +117,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loginAndTest() async {
-    final serverUrl = normalizeServerUrl(_controller.text.trim());
+    final serverUrl = normalizeServerUrl(_rawInput);
     if (serverUrl.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('서버 주소를 먼저 입력하세요'), backgroundColor: AppColors.primary),
@@ -123,7 +140,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   void _save() {
-    ref.read(serverUrlProvider.notifier).set(_controller.text);
+    ref.read(serverUrlProvider.notifier).set(_rawInput);
     ref.read(serverStatusProvider.notifier).refresh();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('저장됐습니다'), backgroundColor: AppColors.primary),
@@ -324,22 +341,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _controller,
-            style: const TextStyle(color: AppColors.textPrimary),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              hintText: '192.168.0.x',
-              prefixText: 'http://',
-              prefixStyle: const TextStyle(color: AppColors.textSecondary),
-              hintStyle: const TextStyle(color: AppColors.textSecondary),
-              filled: true,
-              fillColor: AppColors.surface,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  style: const TextStyle(color: AppColors.textPrimary),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    hintText: '192.168.0.x',
+                    prefixText: 'http://',
+                    prefixStyle: const TextStyle(color: AppColors.textSecondary),
+                    hintStyle: const TextStyle(color: AppColors.textSecondary),
+                    filled: true,
+                    fillColor: AppColors.surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Text(':', style: TextStyle(color: AppColors.textSecondary, fontSize: 20)),
+              ),
+              SizedBox(
+                width: 80,
+                child: TextField(
+                  controller: _portController,
+                  style: const TextStyle(color: AppColors.textPrimary),
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  decoration: InputDecoration(
+                    hintText: '8888',
+                    hintStyle: const TextStyle(color: AppColors.textSecondary),
+                    filled: true,
+                    fillColor: AppColors.surface,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           SizedBox(
