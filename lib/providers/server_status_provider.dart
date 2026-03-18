@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'server_provider.dart';
+import '../services/youtube_service.dart';
 
 enum ServerStatus { checking, connected, disconnected }
 
@@ -29,8 +30,10 @@ class ServerStatusNotifier extends StateNotifier<ServerStatus> {
     state = ServerStatus.checking;
     try {
       final base = serverUrl.endsWith('/') ? serverUrl : '$serverUrl/';
+      final token = YoutubeService.authToken;
+      final headers = token != null ? {'Authorization': 'Bearer $token'} : <String, String>{};
       final res = await http
-          .get(Uri.parse('${base}ping'))
+          .get(Uri.parse('${base}ping'), headers: headers)
           .timeout(const Duration(seconds: 4));
       state = res.statusCode == 200
           ? ServerStatus.connected

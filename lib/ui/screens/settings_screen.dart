@@ -115,9 +115,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _loginUsernameCtrl.text.trim(),
       _loginPasswordCtrl.text,
     );
-    // 3. 로그인 성공 시 자동 연결 테스트
+    // 3. 로그인 성공 시 자동 연결 테스트 + 메인 화면 상태 갱신
     if (ref.read(authProvider).isLoggedIn) {
       await _ping();
+      ref.read(serverStatusProvider.notifier).refresh();
     }
   }
 
@@ -455,7 +456,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
                 child: (auth.isLoading || _pinging)
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('로그인 & 연결 테스트', style: TextStyle(color: Colors.white, fontSize: 16)),
+                    : const Text('로그인', style: TextStyle(color: Colors.white, fontSize: 16)),
               ),
             ),
           ],
