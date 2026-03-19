@@ -1159,7 +1159,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     cmd.extend(['--ffmpeg-location', ffmpeg_dir])
                 else:
                     print('[!] ffmpeg를 찾을 수 없습니다. start.bat을 실행하거나 ffmpeg를 설치하세요.')
-                cmd.extend(['--print', 'title'])
                 cmd.append(f'https://www.youtube.com/watch?v={video_id}')
                 _download_progress[video_id] = 0
                 proc = subprocess.Popen(
@@ -1167,17 +1166,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     text=True, bufsize=1,
                 )
                 stderr_lines = []
-                title_saved = False
                 for line in proc.stdout:
                     stderr_lines.append(line)
-                    stripped = line.strip()
-                    # --print title 출력: [ 로 시작하지 않는 첫 번째 줄
-                    if not title_saved and stripped and not stripped.startswith('['):
-                        title_path = CACHE_DIR / f'{video_id}.title'
-                        title_path.write_text(stripped, encoding='utf-8')
-                        title_saved = True
                     # [download]  45.2% of ... 형태 파싱
-                    m = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', stripped)
+                    m = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', line)
                     if m:
                         _download_progress[video_id] = min(99, int(float(m.group(1))))
                 proc.wait()
@@ -1194,6 +1186,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return
                 add_log(video_id, '완료')
                 print(f'[✓] 완료: {video_id}')
+                # 타이틀 저장 (별도 경량 호출)
+                title_path = CACHE_DIR / f'{video_id}.title'
+                if not title_path.exists():
+                    try:
+                        tr = subprocess.run(
+                            [*ytdlp_cmd, '--print', 'title', '--no-download',
+                             f'https://www.youtube.com/watch?v={video_id}'],
+                            capture_output=True, text=True, timeout=20,
+                        )
+                        title = tr.stdout.strip()
+                        if title:
+                            title_path.write_text(title, encoding='utf-8')
+                    except Exception:
+                        pass
 
         if not mp3_path.exists():
             self._respond(500, b'Conversion failed', 'text/plain')
