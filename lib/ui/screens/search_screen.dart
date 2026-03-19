@@ -112,6 +112,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
       // 플레이리스트 추가 모드
       if (widget.targetPlaylistId != null) {
+        if (mounted) setState(() => _downloadStates[id] = _DownloadState.adding());
         await ref.read(playlistProvider.notifier).addSong(widget.targetPlaylistId!, song);
         if (mounted) {
           setState(() => _downloadStates[id] = _DownloadState.done());
@@ -266,6 +267,19 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     if (state?.isDone == true) {
       return const Icon(Icons.check_circle, color: Colors.green, size: 24);
     }
+    if (state?.isAdding == true) {
+      return const SizedBox(
+        width: 64,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.green)),
+            SizedBox(height: 3),
+            Text('추가 중', style: TextStyle(color: Colors.green, fontSize: 10)),
+          ],
+        ),
+      );
+    }
     if (state?.isLoading == true) {
       final pct = state!.percent;
       return SizedBox(
@@ -303,11 +317,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 class _DownloadState {
   final bool isLoading;
   final bool isDone;
+  final bool isAdding;
   final int percent;
   final String? error;
 
-  const _DownloadState._({this.isLoading = false, this.isDone = false, this.percent = 0, this.error});
+  const _DownloadState._({this.isLoading = false, this.isDone = false, this.isAdding = false, this.percent = 0, this.error});
   factory _DownloadState.progress(int pct) => _DownloadState._(isLoading: true, percent: pct);
+  factory _DownloadState.adding() => const _DownloadState._(isAdding: true);
   factory _DownloadState.done() => const _DownloadState._(isDone: true);
   factory _DownloadState.error(String msg) => _DownloadState._(error: msg);
 }
