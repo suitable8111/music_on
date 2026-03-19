@@ -48,6 +48,11 @@ _active_downloads: set = set()
 _active_lock = threading.Lock()
 _download_progress: dict = {}  # {video_id: int 0-100}
 
+# 유저별 소유권 {video_id: set[username]}
+_ownership: dict = {}
+_ownership_lock = threading.Lock()
+OWNERSHIP_FILE = CACHE_DIR / 'ownership.json'
+
 # 접속자 IP 기록
 _visitors: dict = {}  # {ip: {count, first_seen, last_seen, last_path}}
 _visitors_lock = threading.Lock()
@@ -94,6 +99,34 @@ def _load_sessions():
 def _save_sessions():
     with open(SESSIONS_FILE, 'w', encoding='utf-8') as f:
         json.dump(_sessions, f, ensure_ascii=False, indent=2)
+
+
+def _load_ownership():
+    global _ownership
+    if OWNERSHIP_FILE.exists():
+        try:
+            data = json.loads(OWNERSHIP_FILE.read_text(encoding='utf-8'))
+            _ownership = {k: set(v) for k, v in data.items()}
+        except Exception:
+            _ownership = {}
+
+def _save_ownership():
+    with open(OWNERSHIP_FILE, 'w', encoding='utf-8') as f:
+        json.dump({k: list(v) for k, v in _ownership.items()}, f, ensure_ascii=False, indent=2)
+
+def _add_owner(video_id: str, username: str):
+    with _ownership_lock:
+        if video_id not in _ownership:
+            _ownership[video_id] = set()
+        if username not in _ownership[video_id]:
+            _ownership[video_id].add(username)
+            _save_ownership()
+
+def _is_owner(video_id: str, username: str, is_admin: bool) -> bool:
+    if is_admin:
+        return True
+    with _ownership_lock:
+        return username in _ownership.get(video_id, set())
 
 
 def _hash_pw(password: str, salt: str) -> str:
@@ -910,12 +943,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             username = _require_auth(self)
             if username is None:
                 return
-            self._serve_audio(params['id'][0])
+            self._serve_audio(params['id'][0], username)
         elif parsed.path == '/list':
             username = _require_auth(self)
             if username is None:
                 return
-            self._serve_list()
+            is_admin = _users.get(username, {}).get('role') == 'admin'
+            self._serve_list(username, is_admin)
         elif parsed.path == '/status':
             username = _require_auth(self)
             if username is None:
@@ -1131,7 +1165,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ── GET 핸들러 ──────────────────────────────────────
 
-    def _serve_audio(self, video_id: str):
+    def _serve_audio(self, video_id: str, username: str = ''):
         mp3_path = CACHE_DIR / f'{video_id}.mp3'
         lock = get_lock(video_id)
         with lock:
@@ -1186,6 +1220,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return
                 add_log(video_id, '완료')
                 print(f'[✓] 완료: {video_id}')
+                if username:
+                    _add_owner(video_id, username)
                 # 타이틀 저장 (별도 경량 호출)
                 title_path = CACHE_DIR / f'{video_id}.title'
                 if not title_path.exists():
@@ -1205,6 +1241,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._respond(500, b'Conversion failed', 'text/plain')
             return
 
+        # 이미 캐시된 곡도 요청한 유저를 소유자로 등록
+        if username:
+            _add_owner(video_id, username)
+
         file_size = mp3_path.stat().st_size
         self.send_response(200)
         self.send_header('Content-Type', 'audio/mpeg')
@@ -1215,10 +1255,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with open(mp3_path, 'rb') as f:
             self.wfile.write(f.read())
 
-    def _serve_list(self):
+    def _serve_list(self, username: str = '', is_admin: bool = False):
         songs = []
+        with _ownership_lock:
+            ownership_snapshot = {k: set(v) for k, v in _ownership.items()}
         for f in CACHE_DIR.glob('*.mp3'):
             vid = f.stem
+            # admin은 전체, 일반 유저는 본인 소유 곡만
+            if not is_admin and username not in ownership_snapshot.get(vid, set()):
+                continue
             title_path = CACHE_DIR / f'{vid}.title'
             title = title_path.read_text(encoding='utf-8').strip() if title_path.exists() else vid
             songs.append({'id': vid, 'title': title})
@@ -1231,7 +1276,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_status(self, current_username: str):
-        cache_files = list(CACHE_DIR.glob('*.mp3'))
+        user_info = _users.get(current_username, {})
+        is_admin = user_info.get('role') == 'admin'
+        all_cache_files = list(CACHE_DIR.glob('*.mp3'))
+        # 유저별 필터링 (admin은 전체)
+        with _ownership_lock:
+            ownership_snapshot = {k: set(v) for k, v in _ownership.items()}
+        if is_admin:
+            cache_files = all_cache_files
+        else:
+            cache_files = [
+                f for f in all_cache_files
+                if current_username in ownership_snapshot.get(f.stem, set())
+            ]
         total_size = sum(f.stat().st_size for f in cache_files)
         def _get_title(vid):
             tp = CACHE_DIR / f'{vid}.title'
@@ -1249,8 +1306,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 {'ip': ip, **info}
                 for ip, info in sorted(_visitors.items(), key=lambda x: -x[1]['count'])
             ]
-        user_info = _users.get(current_username, {})
-        is_admin = user_info.get('role') == 'admin'
         data = {
             'uptime': int(time.time() - _start_time),
             'cache_count': len(cache_files),
@@ -1410,6 +1465,7 @@ if __name__ == '__main__':
 
     _load_users()
     _load_sessions()
+    _load_ownership()
 
     dashboard_url = f'http://localhost:{PORT}'
 
