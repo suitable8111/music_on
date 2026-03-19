@@ -1,17 +1,24 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/utils/youtube_utils.dart';
 import '../../providers/audio_provider.dart';
 import '../../providers/downloaded_songs_provider.dart';
+import '../../providers/playlist_provider.dart';
 import '../../providers/server_provider.dart';
 import '../../services/youtube_service.dart';
 import 'player_screen.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
-  const SearchScreen({super.key});
+  /// null 이면 일반 다운로드, 값이 있으면 해당 플레이리스트에 추가
+  final String? targetPlaylistId;
+
+  const SearchScreen({super.key, this.targetPlaylistId});
 
   @override
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
@@ -24,8 +31,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   List<Video>? _results;
   bool _searching = false;
-  // videoId → 다운로드 상태
   final Map<String, _DownloadState> _downloadStates = {};
+  final Map<String, Timer> _progressTimers = {};
 
   @override
   void initState() {
@@ -35,6 +42,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   @override
   void dispose() {
+    for (final t in _progressTimers.values) { t.cancel(); }
     _youtubeService.dispose();
     _searchController.dispose();
     _focusNode.dispose();
@@ -60,29 +68,69 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     }
   }
 
+  void _startProgressPolling(String videoId, String serverUrl) {
+    _progressTimers[videoId]?.cancel();
+    _progressTimers[videoId] = Timer.periodic(const Duration(seconds: 1), (_) async {
+      try {
+        final base = serverUrl.endsWith('/') ? serverUrl : '$serverUrl/';
+        final token = YoutubeService.authToken;
+        final headers = token != null ? {'Authorization': 'Bearer $token'} : <String, String>{};
+        final res = await http.get(
+          Uri.parse('${base}progress?id=$videoId'),
+          headers: headers,
+        ).timeout(const Duration(seconds: 3));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body) as Map<String, dynamic>;
+          final percent = (data['percent'] as num?)?.toInt() ?? 0;
+          if (mounted) {
+            setState(() => _downloadStates[videoId] = _DownloadState.progress(percent));
+          }
+        }
+      } catch (_) {}
+    });
+  }
+
   Future<void> _downloadAndPlay(Video video) async {
     final id = video.id.value;
     if (_downloadStates[id]?.isLoading == true) return;
 
-    setState(() => _downloadStates[id] = _DownloadState.loading());
+    setState(() => _downloadStates[id] = _DownloadState.progress(0));
+
+    final serverUrl = ref.read(serverUrlProvider);
+    _startProgressPolling(id, serverUrl);
 
     try {
-      final serverUrl = ref.read(serverUrlProvider);
       final song = await _youtubeService.fetchSongInfoById(id);
       await _youtubeService.getAudioFilePath(id, serverUrl).timeout(
         const Duration(minutes: 5),
         onTimeout: () => throw Exception('다운로드 시간 초과'),
       );
-      await ref.read(downloadedSongsProvider.notifier).saveSong(song);
-      await ref.read(playerProvider.notifier).playSong(song);
+      _progressTimers[id]?.cancel();
+      _progressTimers.remove(id);
 
-      if (mounted) {
-        setState(() => _downloadStates[id] = _DownloadState.done());
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const PlayerScreen()),
-        );
+      await ref.read(downloadedSongsProvider.notifier).saveSong(song);
+
+      // 플레이리스트 추가 모드
+      if (widget.targetPlaylistId != null) {
+        await ref.read(playlistProvider.notifier).addSong(widget.targetPlaylistId!, song);
+        if (mounted) {
+          setState(() => _downloadStates[id] = _DownloadState.done());
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('"${song.title}" 플레이리스트에 추가됐습니다'), backgroundColor: AppColors.primary),
+          );
+        }
+      } else {
+        await ref.read(playerProvider.notifier).playSong(song);
+        if (mounted) {
+          setState(() => _downloadStates[id] = _DownloadState.done());
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const PlayerScreen()),
+          );
+        }
       }
     } catch (e) {
+      _progressTimers[id]?.cancel();
+      _progressTimers.remove(id);
       if (mounted) {
         setState(() => _downloadStates[id] = _DownloadState.error(e.toString()));
         ScaffoldMessenger.of(context).showSnackBar(
@@ -94,6 +142,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isPlaylistMode = widget.targetPlaylistId != null;
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -110,7 +159,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           style: const TextStyle(color: AppColors.textPrimary, fontSize: 16),
           textInputAction: TextInputAction.search,
           decoration: InputDecoration(
-            hintText: '곡 제목, 아티스트 검색',
+            hintText: isPlaylistMode ? '플레이리스트에 추가할 곡 검색' : '곡 제목, 아티스트 검색',
             hintStyle: const TextStyle(color: AppColors.textSecondary),
             border: InputBorder.none,
             suffixIcon: _searchController.text.isNotEmpty
@@ -146,7 +195,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     }
 
     final results = _results;
-
     if (results == null) {
       return Center(
         child: Column(
@@ -215,26 +263,51 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Widget _buildTrailing(_DownloadState? state, Video video) {
-    if (state?.isLoading == true) {
-      return const SizedBox(
-        width: 24, height: 24,
-        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
-      );
-    }
     if (state?.isDone == true) {
       return const Icon(Icons.check_circle, color: Colors.green, size: 24);
     }
-    return const Icon(Icons.download_outlined, color: AppColors.textSecondary, size: 24);
+    if (state?.isLoading == true) {
+      final pct = state!.percent;
+      return SizedBox(
+        width: 40,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 24, height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.primary,
+                value: pct > 0 ? pct / 100.0 : null,
+              ),
+            ),
+            if (pct > 0) ...[
+              const SizedBox(height: 2),
+              Text('$pct%', style: const TextStyle(color: AppColors.textSecondary, fontSize: 10)),
+            ],
+          ],
+        ),
+      );
+    }
+    if (state?.error != null) {
+      return const Icon(Icons.error_outline, color: Colors.redAccent, size: 24);
+    }
+    return Icon(
+      widget.targetPlaylistId != null ? Icons.playlist_add : Icons.download_outlined,
+      color: AppColors.textSecondary,
+      size: 24,
+    );
   }
 }
 
 class _DownloadState {
   final bool isLoading;
   final bool isDone;
+  final int percent;
   final String? error;
 
-  const _DownloadState._({this.isLoading = false, this.isDone = false, this.error});
-  factory _DownloadState.loading() => const _DownloadState._(isLoading: true);
+  const _DownloadState._({this.isLoading = false, this.isDone = false, this.percent = 0, this.error});
+  factory _DownloadState.progress(int pct) => _DownloadState._(isLoading: true, percent: pct);
   factory _DownloadState.done() => const _DownloadState._(isDone: true);
   factory _DownloadState.error(String msg) => _DownloadState._(error: msg);
 }

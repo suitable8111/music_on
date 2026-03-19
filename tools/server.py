@@ -13,6 +13,7 @@ yt-dlp로 YouTube 오디오를 mp3로 변환해 앱에 서빙합니다.
 import http.server
 import subprocess
 import shutil
+import re
 import os
 import sys
 import json
@@ -45,6 +46,7 @@ _log_lock = threading.Lock()
 # 현재 진행 중인 다운로드 목록
 _active_downloads: set = set()
 _active_lock = threading.Lock()
+_download_progress: dict = {}  # {video_id: int 0-100}
 
 # 접속자 IP 기록
 _visitors: dict = {}  # {ip: {count, first_seen, last_seen, last_path}}
@@ -448,8 +450,8 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <!-- ── 캐시된 곡 목록 ──────────────────────────────────── -->
 <div class="section-title">🎵 캐시된 곡 목록</div>
 <table>
-  <thead><tr><th>#</th><th>Video ID</th><th>크기</th></tr></thead>
-  <tbody id="song-body"><tr><td colspan="3" class="empty">로딩 중...</td></tr></tbody>
+  <thead><tr><th>#</th><th>Video ID</th><th>크기</th><th></th></tr></thead>
+  <tbody id="song-body"><tr><td colspan="4" class="empty">로딩 중...</td></tr></tbody>
 </table>
 </div><!-- /#dashboard-view -->
 
@@ -741,6 +743,14 @@ async function restartServer() {
   }, 500);
 }
 
+async function deleteSong(id) {
+  if (!confirm(id + '\n\n이 곡을 캐시에서 삭제할까요?')) return;
+  const r = await authFetch('/cache/delete-song', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id})});
+  const d = await r.json();
+  showToast(d.message, r.ok);
+  if (r.ok) refresh();
+}
+
 async function clearCache() {
   if (!confirm('캐시된 모든 mp3 파일을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.')) return;
   const r = await authFetch('/cache/clear', {method:'POST'});
@@ -814,11 +824,12 @@ function renderStatus(status) {
   const sb = document.getElementById('song-body');
   const ids = Object.keys(status.cache_files);
   if (!ids.length) {
-    sb.innerHTML = '<tr><td colspan="3" class="empty">캐시된 곡 없음</td></tr>';
+    sb.innerHTML = '<tr><td colspan="4" class="empty">캐시된 곡 없음</td></tr>';
   } else {
     sb.innerHTML = ids.map((id, i) =>
       '<tr><td>' + (i+1) + '</td><td style="font-family:monospace">' + id +
-      '</td><td>' + status.cache_files[id] + ' MB</td></tr>'
+      '</td><td>' + status.cache_files[id] + ' MB</td>' +
+      '<td><button class="btn-danger" style="padding:3px 10px;font-size:12px" onclick="deleteSong(\'' + id + '\')">삭제</button></td></tr>'
     ).join('');
   }
 
@@ -876,9 +887,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             username = _require_auth(self)
             if username is None:
                 return
-            # 만료 세션 정리 (요청마다 경량 수행)
             _cleanup_expired_sessions()
             self._respond(200, b'pong', 'text/plain')
+        elif parsed.path == '/progress' and 'id' in params:
+            username = _require_auth(self)
+            if username is None:
+                return
+            vid = params['id'][0]
+            mp3_path = CACHE_DIR / f'{vid}.mp3'
+            if mp3_path.exists():
+                self._json(200, {'percent': 100, 'done': True})
+            elif vid in _download_progress:
+                self._json(200, {'percent': _download_progress[vid], 'done': False})
+            else:
+                self._json(200, {'percent': 0, 'done': False})
         elif parsed.path == '/audio' and 'id' in params:
             username = _require_auth(self)
             if username is None:
@@ -929,6 +951,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if username is None:
                 return
             self._handle_cache_clear()
+        elif parsed.path == '/cache/delete-song':
+            username = _require_auth(self, require_admin=True)
+            if username is None:
+                return
+            self._handle_cache_delete_song(body)
         elif parsed.path == '/backup':
             username = _require_auth(self, require_admin=True)
             if username is None:
@@ -1128,14 +1155,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 else:
                     print('[!] ffmpeg를 찾을 수 없습니다. start.bat을 실행하거나 ffmpeg를 설치하세요.')
                 cmd.append(f'https://www.youtube.com/watch?v={video_id}')
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                _download_progress[video_id] = 0
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1,
+                )
+                stderr_lines = []
+                for line in proc.stdout:
+                    stderr_lines.append(line)
+                    # [download]  45.2% of ... 형태 파싱
+                    m = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', line)
+                    if m:
+                        _download_progress[video_id] = min(99, int(float(m.group(1))))
+                proc.wait()
+                returncode = proc.returncode
                 with _active_lock:
                     _active_downloads.discard(video_id)
+                _download_progress.pop(video_id, None)
 
-                if result.returncode != 0:
-                    print(f'[!] yt-dlp 오류: {result.stderr}')
+                if returncode != 0:
+                    err = ''.join(stderr_lines)
+                    print(f'[!] yt-dlp 오류: {err}')
                     add_log(video_id, '오류')
-                    self._respond(500, result.stderr.encode(), 'text/plain')
+                    self._respond(500, err.encode(), 'text/plain')
                     return
                 add_log(video_id, '완료')
                 print(f'[✓] 완료: {video_id}')
@@ -1231,6 +1273,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 pass
         print(f'[캐시] {count}개 파일 삭제')
         self._json(200, {'message': f'캐시 {count}곡 삭제 완료'})
+
+    def _handle_cache_delete_song(self, body: dict):
+        video_id = body.get('id', '').strip()
+        if not video_id:
+            self._json(400, {'message': 'id 파라미터가 필요합니다'})
+            return
+        mp3_path = CACHE_DIR / f'{video_id}.mp3'
+        if not mp3_path.exists():
+            self._json(404, {'message': '파일을 찾을 수 없습니다'})
+            return
+        try:
+            mp3_path.unlink()
+            print(f'[캐시] 개별 삭제: {video_id}')
+            self._json(200, {'message': f'{video_id} 삭제 완료'})
+        except Exception as e:
+            self._json(500, {'message': f'삭제 실패: {e}'})
 
     def _handle_backup(self, body: dict):
         dest_str = body.get('dest', '').strip()

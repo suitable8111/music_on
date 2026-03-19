@@ -13,6 +13,7 @@ import '../widgets/add_url_dialog.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/song_tile.dart';
 import 'player_screen.dart';
+import 'search_screen.dart';
 
 class PlaylistScreen extends ConsumerWidget {
   const PlaylistScreen({super.key});
@@ -337,6 +338,15 @@ class _PlaylistDetailScreenState extends ConsumerState<PlaylistDetailScreen> {
                 index: 0,
               ),
             ),
+          IconButton(
+            icon: const Icon(Icons.search, color: AppColors.primary),
+            tooltip: '검색해서 추가',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => SearchScreen(targetPlaylistId: current.id),
+              ),
+            ),
+          ),
           _isAdding
               ? const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 12),
