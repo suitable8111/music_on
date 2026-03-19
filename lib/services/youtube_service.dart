@@ -141,14 +141,27 @@ class YoutubeService {
         .toList();
   }
 
-  /// 서버에 캐시된 videoId 목록 반환
-  Future<List<String>> fetchServerIds(String serverUrl) async {
+  /// 서버에 캐시된 곡 목록 반환 [{id, title}]
+  Future<List<Map<String, String>>> fetchServerSongs(String serverUrl) async {
     final base = serverUrl.endsWith('/') ? serverUrl : '$serverUrl/';
     final res = await http
         .get(Uri.parse('${base}list'), headers: _authHeaders)
         .timeout(const Duration(seconds: 10));
     if (res.statusCode != 200) throw Exception('서버 오류: ${res.statusCode}');
-    return List<String>.from(jsonDecode(res.body) as List);
+    final list = jsonDecode(res.body) as List;
+    return list.map((e) {
+      if (e is Map) {
+        return {'id': e['id'] as String, 'title': (e['title'] as String?) ?? e['id'] as String};
+      }
+      final id = e.toString();
+      return {'id': id, 'title': id};
+    }).toList();
+  }
+
+  /// 서버에 캐시된 videoId 목록만 반환 (하위 호환)
+  Future<List<String>> fetchServerIds(String serverUrl) async {
+    final songs = await fetchServerSongs(serverUrl);
+    return songs.map((s) => s['id']!).toList();
   }
 
   /// YouTube 검색 — 최대 [maxResults]개 Video 반환

@@ -182,24 +182,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     try {
       final results = await Future.wait([
-        _youtubeService.fetchServerIds(serverUrl),
+        _youtubeService.fetchServerSongs(serverUrl),
         _youtubeService.getLocalCachedIds(),
       ]);
 
-      final serverIds = results[0].toSet();
-      final localIds = results[1].toSet();
-      final missingIds = serverIds.difference(localIds);
-
+      final serverSongs = results[0] as List<Map<String, String>>;
+      final localIds = (results[1] as List<String>).toSet();
       final songMap = _buildSongMap();
 
-      final items = missingIds.map((id) {
-        final song = songMap[id];
-        return _SyncItem(
-          videoId: id,
-          title: song?.title ?? id,
-          song: song,
-        );
-      }).toList()
+      final items = serverSongs
+          .where((s) => !localIds.contains(s['id']))
+          .map((s) {
+            final id = s['id']!;
+            final song = songMap[id];
+            // 로컬 메타데이터 우선, 없으면 서버 타이틀, 없으면 ID
+            final title = song?.title ?? s['title'] ?? id;
+            return _SyncItem(videoId: id, title: title, song: song);
+          }).toList()
         ..sort((a, b) => a.title.compareTo(b.title));
 
       setState(() { _syncItems = items; });

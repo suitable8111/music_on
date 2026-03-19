@@ -450,7 +450,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <!-- ── 캐시된 곡 목록 ──────────────────────────────────── -->
 <div class="section-title">🎵 캐시된 곡 목록</div>
 <table>
-  <thead><tr><th>#</th><th>Video ID</th><th>크기</th><th></th></tr></thead>
+  <thead><tr><th>#</th><th>제목 / Video ID</th><th>크기</th><th></th></tr></thead>
   <tbody id="song-body"><tr><td colspan="4" class="empty">로딩 중...</td></tr></tbody>
 </table>
 </div><!-- /#dashboard-view -->
@@ -826,11 +826,16 @@ function renderStatus(status) {
   if (!ids.length) {
     sb.innerHTML = '<tr><td colspan="4" class="empty">캐시된 곡 없음</td></tr>';
   } else {
-    sb.innerHTML = ids.map((id, i) =>
-      '<tr><td>' + (i+1) + '</td><td style="font-family:monospace">' + id +
-      '</td><td>' + status.cache_files[id] + ' MB</td>' +
-      '<td><button class="btn-danger" style="padding:3px 10px;font-size:12px" onclick="deleteSong(\'' + id + '\')">삭제</button></td></tr>'
-    ).join('');
+    sb.innerHTML = ids.map((id, i) => {
+      const info = status.cache_files[id];
+      const title = (info && info.title) ? info.title : id;
+      const sizeMb = (info && info.size_mb) ? info.size_mb : info;
+      return '<tr><td>' + (i+1) + '</td>' +
+        '<td><div style="font-weight:500;font-size:13px">' + title + '</div>' +
+        '<div style="font-family:monospace;font-size:11px;color:#888">' + id + '</div></td>' +
+        '<td>' + sizeMb + ' MB</td>' +
+        '<td><button class="btn-danger" style="padding:3px 10px;font-size:12px" onclick="deleteSong(\'' + id + '\')">삭제</button></td></tr>';
+    }).join('');
   }
 
   // 관리자 전용: 사용자 목록 & 세션 목록
@@ -1154,6 +1159,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     cmd.extend(['--ffmpeg-location', ffmpeg_dir])
                 else:
                     print('[!] ffmpeg를 찾을 수 없습니다. start.bat을 실행하거나 ffmpeg를 설치하세요.')
+                cmd.extend(['--print', 'title'])
                 cmd.append(f'https://www.youtube.com/watch?v={video_id}')
                 _download_progress[video_id] = 0
                 proc = subprocess.Popen(
@@ -1161,10 +1167,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     text=True, bufsize=1,
                 )
                 stderr_lines = []
+                title_saved = False
                 for line in proc.stdout:
                     stderr_lines.append(line)
+                    stripped = line.strip()
+                    # --print title 출력: [ 로 시작하지 않는 첫 번째 줄
+                    if not title_saved and stripped and not stripped.startswith('['):
+                        title_path = CACHE_DIR / f'{video_id}.title'
+                        title_path.write_text(stripped, encoding='utf-8')
+                        title_saved = True
                     # [download]  45.2% of ... 형태 파싱
-                    m = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', line)
+                    m = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', stripped)
                     if m:
                         _download_progress[video_id] = min(99, int(float(m.group(1))))
                 proc.wait()
@@ -1197,8 +1210,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(f.read())
 
     def _serve_list(self):
-        ids = [f.stem for f in CACHE_DIR.glob('*.mp3')]
-        body = json.dumps(ids).encode()
+        songs = []
+        for f in CACHE_DIR.glob('*.mp3'):
+            vid = f.stem
+            title_path = CACHE_DIR / f'{vid}.title'
+            title = title_path.read_text(encoding='utf-8').strip() if title_path.exists() else vid
+            songs.append({'id': vid, 'title': title})
+        body = json.dumps(songs).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(body)))
@@ -1209,7 +1227,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _serve_status(self, current_username: str):
         cache_files = list(CACHE_DIR.glob('*.mp3'))
         total_size = sum(f.stat().st_size for f in cache_files)
-        file_sizes = {f.stem: round(f.stat().st_size / 1024 / 1024, 1) for f in cache_files}
+        def _get_title(vid):
+            tp = CACHE_DIR / f'{vid}.title'
+            return tp.read_text(encoding='utf-8').strip() if tp.exists() else vid
+        file_sizes = {
+            f.stem: {'size_mb': round(f.stat().st_size / 1024 / 1024, 1), 'title': _get_title(f.stem)}
+            for f in cache_files
+        }
         with _active_lock:
             active_count = len(_active_downloads)
         with _log_lock:
