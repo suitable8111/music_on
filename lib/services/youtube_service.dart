@@ -164,10 +164,14 @@ class YoutubeService {
     return songs.map((s) => s['id']!).toList();
   }
 
-  /// YouTube 검색 — 최대 [maxResults]개 Video 반환
-  Future<List<Video>> searchVideos(String query, {int maxResults = 20}) async {
-    final results = await _yt.search.search(query);
-    return results.whereType<Video>().take(maxResults).toList();
+  /// YouTube 검색 첫 페이지 반환 (약 20개)
+  Future<VideoSearchList> searchVideos(String query) async {
+    return _yt.search.search(query);
+  }
+
+  /// 다음 페이지 로드 — 없으면 null 반환
+  Future<VideoSearchList?> searchNextPage(VideoSearchList current) async {
+    return current.nextPage();
   }
 
   /// 특정 곡 캐시 삭제

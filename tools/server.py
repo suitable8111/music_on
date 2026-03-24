@@ -483,7 +483,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <!-- ── 캐시된 곡 목록 ──────────────────────────────────── -->
 <div class="section-title">🎵 캐시된 곡 목록</div>
 <table>
-  <thead><tr><th>#</th><th>제목 / Video ID</th><th>크기</th><th></th></tr></thead>
+  <thead><tr><th>#</th><th>제목 / Video ID</th><th>크기</th><th>소유자</th><th></th></tr></thead>
   <tbody id="song-body"><tr><td colspan="4" class="empty">로딩 중...</td></tr></tbody>
 </table>
 </div><!-- /#dashboard-view -->
@@ -857,16 +857,20 @@ function renderStatus(status) {
   const sb = document.getElementById('song-body');
   const ids = Object.keys(status.cache_files);
   if (!ids.length) {
-    sb.innerHTML = '<tr><td colspan="4" class="empty">캐시된 곡 없음</td></tr>';
+    sb.innerHTML = '<tr><td colspan="5" class="empty">캐시된 곡 없음</td></tr>';
   } else {
     sb.innerHTML = ids.map((id, i) => {
       const info = status.cache_files[id];
       const title = (info && info.title) ? info.title : id;
       const sizeMb = (info && info.size_mb) ? info.size_mb : info;
+      const owners = (info && info.owners && info.owners.length)
+        ? info.owners.map(o => '<span class="badge role-' + (o === (status.current_user) ? 'admin' : 'user') + '" style="margin-right:3px">' + o + '</span>').join('')
+        : '<span style="color:#555;font-size:12px">없음</span>';
       return '<tr><td>' + (i+1) + '</td>' +
         '<td><div style="font-weight:500;font-size:13px">' + title + '</div>' +
         '<div style="font-family:monospace;font-size:11px;color:#888">' + id + '</div></td>' +
         '<td>' + sizeMb + ' MB</td>' +
+        '<td>' + owners + '</td>' +
         '<td><button class="btn-danger" style="padding:3px 10px;font-size:12px" onclick="deleteSong(\'' + id + '\')">삭제</button></td></tr>';
     }).join('');
   }
@@ -1294,7 +1298,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             tp = CACHE_DIR / f'{vid}.title'
             return tp.read_text(encoding='utf-8').strip() if tp.exists() else vid
         file_sizes = {
-            f.stem: {'size_mb': round(f.stat().st_size / 1024 / 1024, 1), 'title': _get_title(f.stem)}
+            f.stem: {
+                'size_mb': round(f.stat().st_size / 1024 / 1024, 1),
+                'title': _get_title(f.stem),
+                'owners': sorted(ownership_snapshot.get(f.stem, set())),
+            }
             for f in cache_files
         }
         with _active_lock:

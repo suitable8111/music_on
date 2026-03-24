@@ -28,9 +28,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _youtubeService = YoutubeService();
   final _searchController = TextEditingController();
   final _focusNode = FocusNode();
+  final _scrollController = ScrollController();
 
   List<Video>? _results;
+  VideoSearchList? _currentPage;
   bool _searching = false;
+  bool _loadingMore = false;
+  bool _hasMore = true;
   final Map<String, _DownloadState> _downloadStates = {};
   final Map<String, Timer> _progressTimers = {};
 
@@ -38,6 +42,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
+    _scrollController.addListener(_onScroll);
   }
 
   @override
@@ -46,17 +51,31 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     _youtubeService.dispose();
     _searchController.dispose();
     _focusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      _loadMore();
+    }
   }
 
   Future<void> _search() async {
     final query = _searchController.text.trim();
     if (query.isEmpty) return;
     _focusNode.unfocus();
-    setState(() { _searching = true; _results = null; });
+    setState(() { _searching = true; _results = null; _currentPage = null; _hasMore = true; });
     try {
-      final results = await _youtubeService.searchVideos(query);
-      if (mounted) setState(() => _results = results);
+      final page = await _youtubeService.searchVideos(query);
+      if (mounted) {
+        setState(() {
+          _results = List<Video>.from(page);
+          _currentPage = page;
+          _hasMore = true;
+        });
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -65,6 +84,26 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       }
     } finally {
       if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore || _currentPage == null || _searching) return;
+    setState(() => _loadingMore = true);
+    try {
+      final nextPage = await _youtubeService.searchNextPage(_currentPage!);
+      if (!mounted) return;
+      if (nextPage == null || nextPage.isEmpty) {
+        setState(() { _hasMore = false; _loadingMore = false; });
+        return;
+      }
+      setState(() {
+        _results!.addAll(nextPage);
+        _currentPage = nextPage;
+        _loadingMore = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -216,9 +255,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     }
 
     return ListView.builder(
+      controller: _scrollController,
       padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: results.length,
+      itemCount: results.length + (_loadingMore ? 1 : 0),
       itemBuilder: (_, i) {
+        if (i == results.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)),
+          );
+        }
         final video = results[i];
         final id = video.id.value;
         final state = _downloadStates[id];
